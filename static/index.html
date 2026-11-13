@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>科研小助手 Agent</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">科研小助手 <span>Agent</span></div>
+  <nav class="tabs">
+    <button data-tab="library" class="active">文库</button>
+    <button data-tab="reader">阅读</button>
+    <button data-tab="qa">问答</button>
+    <button data-tab="graph">图谱</button>
+    <button data-tab="write">写作</button>
+    <button data-tab="rec">推荐</button>
+  </nav>
+  <div class="status" id="sysStatus">检测中…</div>
+</header>
+
+<main>
+  <!-- ========== 文库 ========== -->
+  <section id="tab-library" class="tab-panel active">
+    <div class="panel-row">
+      <div class="card upload-card">
+        <h3>上传 PDF（可批量）</h3>
+        <div class="dropzone" id="dropzone">
+          拖拽 PDF 到这里，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".pdf" multiple hidden /></label>
+        </div>
+        <div class="hint">上传后自动解析结构并做内容去重（同一篇的不同版本会提示你选保留哪版）</div>
+        <div id="uploadLog" class="log"></div>
+      </div>
+      <div class="card">
+        <h3>按 arXiv 编号下载</h3>
+        <div class="inline">
+          <input id="arxivIds" placeholder="如 1706.03762v7, 1810.04805" />
+          <button id="btnArxivId">下载入库</button>
+        </div>
+        <div class="inline" style="margin-top:10px">
+          <input id="arxivQuery" placeholder="或按关键词/标题检索（如 attention is all you need）" />
+          <button id="btnArxivSearch">检索并下载</button>
+        </div>
+        <div id="arxivLog" class="log"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>我的文库</h3>
+        <button class="ghost" id="btnRefreshLib">刷新</button>
+      </div>
+      <table class="papers" id="paperTable">
+        <thead><tr><th></th><th>标题</th><th>年份</th><th>页数</th><th>字符数</th><th>参考文献</th><th>版式</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="libEmpty">还没有论文，先上传或从 arXiv 下载。</div>
+    </div>
+  </section>
+
+  <!-- ========== 阅读 ========== -->
+  <section id="tab-reader" class="tab-panel">
+    <div class="reader-bar">
+      <select id="readerPaper"></select>
+      <div class="reader-nav">
+        <button class="ghost" id="btnPrevPage">上一页</button>
+        <span id="pageIndicator">1 / 1</span>
+        <button class="ghost" id="btnNextPage">下一页</button>
+      </div>
+      <div class="reader-tools">
+        <button id="btnTranslatePage">翻译本页</button>
+        <button class="ghost" id="btnTranslateAll">翻译全文</button>
+        <label class="chk"><input type="checkbox" id="chkCompare" /> 中英对照</label>
+      </div>
+    </div>
+    <div class="reader-body">
+      <aside class="outline-pane card">
+        <h4>大纲导航</h4>
+        <div id="outlineTree" class="tree"></div>
+        <h4 style="margin-top:16px">参考文献</h4>
+        <div id="refList" class="refs"></div>
+      </aside>
+      <div class="page-pane" id="pagePane">
+        <div class="page-wrap" id="pageWrap"></div>
+      </div>
+      <aside class="trans-pane card" id="transPane">
+        <h4>译文</h4>
+        <div class="hint">拖动选中正文 → 右侧出现单段译文；或点「翻译本页」整页翻译。</div>
+        <div id="transList" class="trans-list"></div>
+      </aside>
+    </div>
+    <div class="float-tip" id="floatTip"></div>
+  </section>
+
+  <!-- ========== 问答 ========== -->
+  <section id="tab-qa" class="tab-panel">
+    <div class="card">
+      <h3>选论文（不选＝全部文库）</h3>
+      <div id="qaPapers" class="chip-box"></div>
+      <div class="qa-input">
+        <textarea id="qaQuestion" rows="3" placeholder="例如：BERT 的架构和原始 Transformer 的 Encoder 有什么承接关系？BERT 丢弃了哪部分？"></textarea>
+        <button id="btnAsk">提问</button>
+      </div>
+      <div class="answer card inset" id="qaAnswer" hidden></div>
+    </div>
+  </section>
+
+  <!-- ========== 图谱 ========== -->
+  <section id="tab-graph" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h3>引用网络与核心节点</h3>
+        <button id="btnBuildGraph">生成图谱</button>
+      </div>
+      <div class="graph-layout">
+        <svg id="graphSvg" viewBox="0 0 900 560"></svg>
+        <div class="graph-side">
+          <h4>枢纽（基石论文）</h4>
+          <ul id="coreList"></ul>
+          <h4>边缘论文</h4>
+          <ul id="periphList"></ul>
+          <h4>被引最多的外部工作</h4>
+          <ul id="extList"></ul>
+          <button class="ghost" id="btnSurvey">自动综述</button>
+          <button class="ghost" id="btnFuture">未来工作建议</button>
+          <div class="answer inset" id="analysisOut" hidden></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 写作 ========== -->
+  <section id="tab-write" class="tab-panel">
+    <div class="panel-row">
+      <div class="card">
+        <h3>论文框架生成</h3>
+        <textarea id="ideaBox" rows="4" placeholder="写下你的 idea：例如 用稀疏注意力降低长文本推理成本"></textarea>
+        <button id="btnOutline">生成框架</button>
+        <div class="answer inset" id="outlineOut" hidden></div>
+      </div>
+      <div class="card">
+        <h3>架构拓扑图（Mermaid）</h3>
+        <textarea id="diagramDesc" rows="2" placeholder="描述架构：输入→分词→Transformer 编码器堆叠→分类头"></textarea>
+        <button id="btnDiagram">生成</button>
+        <pre class="code" id="diagramOut"></pre>
+      </div>
+    </div>
+    <div class="card">
+      <h3>实验数据可视化</h3>
+      <div class="inline">
+        <input type="file" id="csvInput" accept=".csv,.xlsx" />
+        <select id="plotKind"><option value="line">折线图</option><option value="bar">柱状图</option><option value="radar">雷达图</option></select>
+        <input id="plotDesc" placeholder="图表说明，如 不同模型在 BLEU 上的对比" style="flex:1" />
+        <button id="btnPlot">生成图表</button>
+      </div>
+      <div id="plotOut" class="plot-out"></div>
+    </div>
+  </section>
+
+  <!-- ========== 推荐 ========== -->
+  <section id="tab-rec" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h3>每日/每周新论文推荐</h3>
+        <button id="btnRecommend">抓取最新 arXiv</button>
+      </div>
+      <div class="hint">推荐依据：与文库主题词的重合度，摘要提到开源代码的加权优先；点「有用 / 不相关」会记录反馈。</div>
+      <div id="recList" class="rec-list"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
