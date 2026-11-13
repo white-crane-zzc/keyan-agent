@@ -48,6 +48,12 @@ ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF = "https://arxiv.org/pdf/"
 
 
+_PLACEHOLDER_HINTS = ("在这里", "你的key", "你的方舟key", "sk-xxx", "xxx", "your-key", "<")
+
+
 def llm_ready() -> bool:
-    """是否配置了大模型。本地 Ollama 不需要 key。"""
-    return bool(LLM_API_KEY) or "localhost" in LLM_BASE_URL or "127.0.0.1" in LLM_BASE_URL
+    """是否配置了大模型。本地 Ollama 不需要 key；占位文本不算配置。"""
+    local = "localhost" in LLM_BASE_URL or "127.0.0.1" in LLM_BASE_URL
+    key = LLM_API_KEY
+    valid_key = bool(key) and len(key) >= 8 and not any(h in key for h in _PLACEHOLDER_HINTS)
+    return valid_key or local
