@@ -572,17 +572,142 @@ $('#btnOutline').onclick = async () => {
   } catch (e) { out.textContent = '失败：' + e.message; }
 };
 
+// 把 mermaid 的 flowchart 源码就地画成 SVG（离线，不依赖 CDN）
+function renderFlowchart(src, host) {
+  const nodes = new Map();
+  const edges = [];
+  let dir = 'TD';
+  const shape = /^([A-Za-z0-9_\u4e00-\u9fff]+)\s*(?:\[([^\]]*)\]|\(([^)]*)\)|\{([^}]*)\})?$/;
+  const addNode = (tok) => {
+    const m = tok.match(shape);
+    if (!m) return null;
+    const id = m[1];
+    const label = (m[2] || m[3] || m[4] || id).replace(/["']/g, '').trim();
+    if (!nodes.has(id)) nodes.set(id, label);
+    return id;
+  };
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const dm = line.match(/^(?:flowchart|graph)\s+(TD|TB|LR|RL|BT)/i);
+    if (dm) { dir = dm[1].toUpperCase(); continue; }
+    if (/^(%%|classDef|class |style |linkStyle|subgraph|end\b|click\s)/i.test(line)) continue;
+    const parts = line.split(/\s*(?:-->|==>|-.->)\s*(?:\|[^|]*\|)?/).map(s => s.trim()).filter(Boolean);
+    if (!parts.length) continue;
+    const ids = parts.map(addNode);
+    if (ids.some(x => !x)) continue;
+    for (let i = 0; i + 1 < ids.length; i++) edges.push([ids[i], ids[i + 1]]);
+  }
+  if (!nodes.size) { host.innerHTML = ''; return false; }
+
+  const indeg = new Map([...nodes.keys()].map(k => [k, 0]));
+  edges.forEach(([, t]) => indeg.set(t, (indeg.get(t) || 0) + 1));
+  const layer = new Map();
+  const roots = [...nodes.keys()].filter(k => !indeg.get(k));
+  (roots.length ? roots : [[...nodes.keys()][0]]).forEach(r => layer.set(r, 0));
+  for (let it = 0; it < nodes.size + 2; it++) {
+    let changed = false;
+    edges.forEach(([s, t]) => {
+      if (layer.has(s) && (!layer.has(t) || layer.get(t) < layer.get(s) + 1)) {
+        layer.set(t, layer.get(s) + 1); changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  const layers = [];
+  nodes.forEach((label, id) => {
+    const d = layer.has(id) ? layer.get(id) : 0;
+    (layers[d] = layers[d] || []).push([id, label]);
+  });
+
+  const bh = 40, gapCross = 26, gapDepth = 78, pad = 18;
+  const sizes = new Map([...nodes].map(([id, label]) => [id, [Math.min(190, Math.max(96, label.length * 14 + 26)), bh]]));
+  const cross = dir === 'LR' || dir === 'RL';
+  const pos = new Map();
+  let maxCross = 0, maxDepth = 0;
+  layers.forEach((items, d) => {
+    const total = items.reduce((s, [id]) => s + sizes.get(id)[cross ? 1 : 0] + gapCross, -gapCross);
+    let acc = -total / 2;
+    maxCross = Math.max(maxCross, total);
+    maxDepth = Math.max(maxDepth, d);
+    items.forEach(([id]) => {
+      const [w, h] = sizes.get(id);
+      const c = cross ? h : w;
+      pos.set(id, cross ? [d * (190 + gapDepth), acc + c / 2] : [acc + c / 2, d * (bh + gapDepth)]);
+      acc += c + gapCross;
+    });
+  });
+  // 布局坐标是以中心为原点的，先算真实包围盒再平移，否则左半边会被 viewBox 裁掉
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach((label, id) => {
+    const [x, y] = pos.get(id);
+    const [w, h] = sizes.get(id);
+    minX = Math.min(minX, x - w / 2); maxX = Math.max(maxX, x + w / 2);
+    minY = Math.min(minY, y - h / 2); maxY = Math.max(maxY, y + h / 2);
+  });
+  const W = maxX - minX + pad * 2;
+  const H = maxY - minY + pad * 2;
+
+  let out = `<defs><marker id="dar" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto">
+    <path d="M0,0 L8,3.5 L0,7" fill="#7f92b8"/></marker></defs>`;
+  edges.forEach(([s, t]) => {
+    const a = pos.get(s), b = pos.get(t);
+    if (!a || !b) return;
+    const [aw, ah] = sizes.get(s), [bw, bh2] = sizes.get(t);
+    let x1, y1, x2, y2;
+    if (cross) {
+      const sgn = dir === 'LR' ? 1 : -1;
+      x1 = a[0] + sgn * aw / 2; y1 = a[1];
+      x2 = b[0] - sgn * bw / 2; y2 = b[1];
+    } else {
+      const sgn = dir === 'BT' ? -1 : 1;
+      x1 = a[0]; y1 = a[1] + sgn * ah / 2;
+      x2 = b[0]; y2 = b[1] - sgn * bh2 / 2;
+    }
+    out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#9aa8c4" stroke-width="1.4" marker-end="url(#dar)"/>`;
+  });
+  nodes.forEach((label, id) => {
+    const [x, y] = pos.get(id);
+    const [w, h] = sizes.get(id);
+    const shown = label.length > 18 ? label.slice(0, 18) + '…' : label;
+    out += `<g><title>${escapeHtml(label)}</title>
+      <rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="9" fill="#f2f5fd" stroke="#5b8def"/>
+      <text x="${x}" y="${y + 5}" text-anchor="middle" font-size="12.5" fill="#243043">${escapeHtml(shown)}</text></g>`;
+  });
+  const dx = pad - minX, dy = pad - minY;
+  host.innerHTML = `<svg width="${W.toFixed(0)}" height="${H.toFixed(0)}" viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}" preserveAspectRatio="xMidYMid meet"><g transform="translate(${dx.toFixed(1)},${dy.toFixed(1)})">${out}</g></svg>`;
+  return true;
+}
+
 $('#btnDiagram').onclick = async () => {
   const desc = $('#diagramDesc').value.trim();
   if (!desc) return;
+  const kind = $('#diagramKind').value;
+  const prev = $('#diagramPreview');
   $('#diagramOut').textContent = '生成中…';
+  prev.innerHTML = '';
   try {
     const data = await api('/api/write/diagram', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ desc, kind: $('#diagramKind').value }),
+      body: JSON.stringify({ desc, kind }),
     });
     $('#diagramOut').textContent = data.text;
+    if (kind === 'mermaid') {
+      const body = (data.text || '').replace(/```[a-z]*/gi, '').trim();
+      if (!renderFlowchart(body, prev)) {
+        $('#diagramOut').textContent = (data.text || '') + '\n\n（这段 Mermaid 没解析成框图，可直接复制到 mermaid.live 渲染）';
+      }
+    }
   } catch (e) { $('#diagramOut').textContent = '失败：' + e.message; }
+};
+
+$('#btnSampleCsv').onclick = () => {
+  const csv = '模型,BLEU,参数量（M）\nTransformer,29.5,65\nBERT,31.0,110\nGPT-2,29.0,1542\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = '示例数据.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 };
 
 $('#btnPlot').onclick = async () => {
@@ -595,10 +720,12 @@ $('#btnPlot').onclick = async () => {
   $('#plotOut').innerHTML = '绘图…';
   try {
     const data = await api('/api/plot', { method: 'POST', body: fd });
+    const clean = s => (s || '').replace(/\*\*/g, '').replace(/^(?:English\s+)?Figure caption:\s*/i, '').replace(/^中文图注[:：]\s*/, '');
     $('#plotOut').innerHTML = `<img src="${data.image}" />
-      <div class="hint">${escapeHtml(data.caption || '')}</div>
-      <div class="hint">${escapeHtml(data.caption_zh || '')}</div>
-      <div class="hint">${escapeHtml(data.stats || '')}</div>`;
+      <div class="hint">${escapeHtml(clean(data.caption))}</div>
+      <div class="hint">${escapeHtml(clean(data.caption_zh))}</div>
+      <div class="hint">${escapeHtml(clean(data.stats))}</div>
+      <div class="hint">图片已存 ${escapeHtml(data.image)}</div>`;
   } catch (e) { $('#plotOut').textContent = '失败：' + e.message; }
 };
 

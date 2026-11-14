@@ -146,14 +146,16 @@
         <div class="answer inset" id="outlineOut" hidden></div>
       </div>
       <div class="card">
-        <h3>架构拓扑图（Mermaid）</h3>
+        <h3>架构拓扑图</h3>
         <textarea id="diagramDesc" rows="2" placeholder="描述架构：输入→分词→Transformer 编码器堆叠→分类头"></textarea>
         <select id="diagramKind" style="margin-top:8px">
           <option value="mermaid">Mermaid（可直接渲染）</option>
           <option value="tikz">TikZ（LaTeX 论文）</option>
           <option value="graphviz">Graphviz（DOT）</option>
         </select>
+        <div class="hint">Mermaid 会直接在下方画成框图；TikZ／Graphviz 输出可直接粘进 LaTeX／Graphviz 的源码。</div>
         <button id="btnDiagram">生成</button>
+        <div id="diagramPreview" class="diagram-preview"></div>
         <pre class="code" id="diagramOut"></pre>
       </div>
     </div>
@@ -164,8 +166,10 @@
         <select id="plotKind"><option value="line">折线图</option><option value="bar">柱状图</option><option value="radar">雷达图</option></select>
         <input id="plotDesc" placeholder="图表说明，如 不同模型在 BLEU 上的对比" style="flex:1" />
         <button id="btnPlot">生成图表</button>
+        <button class="ghost" id="btnSampleCsv">下载示例 CSV</button>
       </div>
       <div id="plotOut" class="plot-out"></div>
+      <div class="hint">CSV／XLSX 第一列当横轴标签，第二列及以后当数值；只支持两列以上的表。没有现成数据就点「下载示例 CSV」改一改。</div>
     </div>
   </section>
 
