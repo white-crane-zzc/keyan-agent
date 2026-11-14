@@ -252,6 +252,22 @@ async function showPage(n) {
       };
     });
     div.onclick = () => highlightTranslation(b.text);
+    // 悬停翻译：已译过的段落悬停即出译文提示，不用选中
+    div.onmouseenter = ev => {
+      if (!state.reader.trans.size) return;
+      const hit = Array.from(state.reader.trans.values()).find(i => (i.source || '').slice(0, 40) === b.text.slice(0, 40));
+      if (!hit || !hit.text) return;
+      const tip = $('#floatTip');
+      tip.style.display = 'block';
+      tip.style.left = Math.min(window.innerWidth - 440, ev.clientX || 200) + 'px';
+      tip.style.top = ((ev.clientY || 200) + 16) + 'px';
+      tip.textContent = hit.text;
+      tip.dataset.hover = '1';
+    };
+    div.onmouseleave = () => {
+      const tip = $('#floatTip');
+      if (tip.dataset.hover) { tip.style.display = 'none'; tip.dataset.hover = ''; }
+    };
     overlay.appendChild(div);
   });
   wrap.appendChild(overlay);
@@ -288,6 +304,7 @@ $('#btnRefAudit').onclick = async () => {
 // 划词翻译
 async function quickTranslate(text) {
   const tip = $('#floatTip');
+  tip.dataset.hover = '';
   tip.style.display = 'block';
   tip.style.left = Math.min(window.innerWidth - 440, (window.event && window.event.clientX) || 200) + 'px';
   tip.style.top = ((window.event && window.event.clientY) || 200) + 14 + 'px';

@@ -23,23 +23,29 @@
 | `tests/ui_check.py` | CDP 逐页签截图，收集控制台异常 |
 | `tests/ui_flow.py` | 真实点击提问、生成图谱、生成框架、抓取推荐并断言输出 |
 | `tests/demo_video.py` | 采集真实界面截图 + 推镜 + 字幕，输出 `docs\演示视频.mp4` |
+| `tests/reparse.py` / `reparse_one.py` | 解析器改动后重解析全库 / 单篇 |
+| `tests/ingest_folder.py` | 批量入库一个目录下的 PDF（自动跳过重复） |
+| `tests/scanned_check.py` | 合成 4 页扫描件并验证离线 OCR 解析 |
+| `tests/ui_reader_card.py` | 阅读页专项：正文 [n] 跳参考文献、返回正文、中英对照联动 |
+| `tests/req_bench.py` | 需求文档 9 道样例题批量实测 + 图谱导出 |
 
 ## 功能对照
 
 | 需求条目 | 实现 | 入口 |
 |---|---|---|
 | 1.1.1 内容去重（版本差异对比、提示保留新版） | 标题+摘要+MinHash 综合判重，返回相似度、逐项差异（页数/字符/参考/图表/章节增删）与保留建议 | 上传 PDF |
-| 1.1.2 细粒度解析 | 标题、作者、摘要、一~三级标题树、表格、图、参考文献、附录；单栏/双栏自动识别 | `app/parser.py` |
+| 1.1.2 细粒度解析 | 标题、作者、摘要、一~三级标题树、表格、图、参考文献、附录；单栏/双栏自动识别；无文本层页面自动走离线 OCR | `app/parser.py` |
 | 1.2.1 单篇问答（RAG + 原文引用） | BM25 检索 + 上下文编号 + 页码引用，未配置模型时直接给证据 | 问答页 |
 | 1.2.2 多篇对比问答 | 跨论文检索，引用标注论文名+页码 | 问答页（多选） |
 | 1.3.1 双栏/单栏阅读、公式表格排版 | 按 PyMuPDF 文本块 bbox 还原双栏，公式与表格以原始 PDF 渲染保留 | 阅读页 |
-| 1.3.2 树状导航 + 引用跳转/跳回 | 章节树点击定位；参考文献条目点击跳到被引论文并记返回栈 | 阅读页 |
-| 1.3.3 部分/整篇/中英对照翻译 | 划词翻译、整页翻译、对照模式；代码公式块跳过；翻译缓存入库 | 阅读页 |
-| 1.4.1 按名称自动下载入库、参考文献批量下载 | arXiv API 检索下载入库；参考文献列表批量解析下载 | 文库页 |
-| 1.4.2 定期刷新 arXiv | `/api/recommend` 拉取最近提交并按相关度排序 | 推荐页 |
+| 1.3.2 树状导航 + 引用跳转/跳回 | 章节树点击定位；正文 `[n]` 上标 → 左栏参考文献高亮 → 「返回正文」回到原页原位置 | 阅读页 |
+| 1.3.3 部分/整篇/中英对照翻译 | 划词翻译、整页/按页翻译、中英对照左右滚动联动；代码公式块跳过；翻译缓存入库 | 阅读页 |
+| 1.4.1 按名称自动下载入库、参考文献批量下载 | arXiv API 检索下载入库；`/api/refs/batch` 按正文引用次数筛「保留/存疑」并批量下载候选 | 文库页 |
+| 1.4.2 定期刷新 arXiv | 服务启动即后台线程每 6 小时拉取（`RECOMMEND_REFRESH_HOURS` 可调），结果落库 | 自动 / 推荐页 |
 | 1.4.3 每日/每周推荐（理由、github 优先、赞踩） | 相关性打分 + 推荐理由 + has_code 标记 + 点赞/踩反馈落库 | 推荐页 |
 | 1.5 引用图谱、核心节点挖掘、综述、未来工作 | PageRank 找基石/边缘论文；`/api/survey`、`/api/futurework` 抽取结论/未来工作段落 | 图谱页 |
-| 1.6 写作助手（框架、架构图、CSV 可视化） | 框架生成（References 只取库内真实文献）；Mermaid/TikZ 架构图；CSV → 折线/柱状/雷达 + 学术图注 + 趋势结论 | 写作页 |
+| 1.6 写作助手（框架、架构图、CSV 可视化） | 框架生成（References 只取库内真实文献）；Mermaid/TikZ/Graphviz 架构图；CSV → 折线/柱状/雷达 + 学术图注 + 趋势结论 | 写作页 |
+| 1.3.3 重排导出 | `/api/papers/{pid}/export?fmt=md|html`，按章节重排（摘要→各章→参考文献） | 阅读页 |
 | 3.1 代码仓库 | 本仓库 + README + 环境说明 + Git 历史 | 仓库根目录 |
 | 3.5 敏感信息 | 全部走 `.env`，仓库只提交 `.env.example` | `.gitignore` |
 
@@ -48,7 +54,7 @@
 ```powershell
 # 1. 创建环境并装依赖（Python 3.10+）
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install fastapi "uvicorn[standard]" python-multipart pymupdf numpy networkx httpx matplotlib pandas
+.\.venv\Scripts\python.exe -m pip install fastapi "uvicorn[standard]" python-multipart pymupdf numpy networkx httpx matplotlib pandas rapidocr-onnxruntime
 
 # 2. 启动
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
