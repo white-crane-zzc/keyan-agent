@@ -116,6 +116,7 @@
         <h3>引用网络与核心节点</h3>
         <button id="btnBuildGraph">生成图谱</button>
       </div>
+      <div class="hint">先在「问答」页勾选论文（不勾＝全库 27 篇）。节点＝论文字数，箭头＝参考文献里引用了库内另一篇。</div>
       <div class="graph-layout">
         <svg id="graphSvg" viewBox="0 0 900 560"></svg>
         <div class="graph-side">
@@ -139,12 +140,18 @@
       <div class="card">
         <h3>论文框架生成</h3>
         <textarea id="ideaBox" rows="4" placeholder="写下你的 idea：例如 用稀疏注意力降低长文本推理成本"></textarea>
+        <div class="hint">参考文献只从「问答」页勾选的论文里取（不勾＝全库），不会编造文献。</div>
         <button id="btnOutline">生成框架</button>
         <div class="answer inset" id="outlineOut" hidden></div>
       </div>
       <div class="card">
         <h3>架构拓扑图（Mermaid）</h3>
         <textarea id="diagramDesc" rows="2" placeholder="描述架构：输入→分词→Transformer 编码器堆叠→分类头"></textarea>
+        <select id="diagramKind" style="margin-top:8px">
+          <option value="mermaid">Mermaid（可直接渲染）</option>
+          <option value="tikz">TikZ（LaTeX 论文）</option>
+          <option value="graphviz">Graphviz（DOT）</option>
+        </select>
         <button id="btnDiagram">生成</button>
         <pre class="code" id="diagramOut"></pre>
       </div>

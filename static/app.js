@@ -563,7 +563,7 @@ $('#btnDiagram').onclick = async () => {
   try {
     const data = await api('/api/write/diagram', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ desc }),
+      body: JSON.stringify({ desc, kind: $('#diagramKind').value }),
     });
     $('#diagramOut').textContent = data.text;
   } catch (e) { $('#diagramOut').textContent = '失败：' + e.message; }
