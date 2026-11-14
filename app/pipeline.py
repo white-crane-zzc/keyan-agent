@@ -79,12 +79,56 @@ def _title_author_score(existing_meta: dict, incoming_meta: dict) -> dict:
     return {"title": title_sim, "abstract": abs_sim, "author": author_hit}
 
 
+def _unique_pdf_name(name: str) -> str:
+    """同名文件不覆盖磁盘上已有的 PDF，改为「名 (2).pdf」，避免两条记录共用一个文件。"""
+    dst = PDF_DIR / name
+    if not dst.exists():
+        return name
+    stem, suf = Path(name).stem, Path(name).suffix
+    i = 2
+    while (PDF_DIR / f"{stem} ({i}){suf}").exists():
+        i += 1
+    return f"{stem} ({i}){suf}"
+
+
 def ingest(path: str | Path, display_name: str | None = None,
            on_duplicate: str = "ask") -> dict[str, Any]:
     """on_duplicate: ask(返回给前端选择) | keep_both | replace"""
     src = Path(path)
     name = display_name or src.name
     sha, sig = content_fingerprint(src)
+
+    # 第一层：整份文件内容完全一致（同一份 PDF 又传一次）。这一步不解析全文，
+    # 90 页的 PDF 判重从一分多钟降到一秒级，用户立刻就能选保留哪一版。
+    exact = [dict(r) for r in q(
+        "SELECT id, title, filename, meta_json FROM papers WHERE sha256=?", (sha,))]
+    if exact and on_duplicate != "keep_both":
+        old = exact[0]
+        if on_duplicate == "ask":
+            import fitz
+            with fitz.open(str(src)) as doc:
+                n_pages = doc.page_count
+            return {
+                "status": "duplicate",
+                "exact": True,
+                "existing": {"id": old["id"], "title": old["title"], "filename": old["filename"],
+                             "meta": json.loads(old["meta_json"] or "{}")},
+                "similarity": 1.0,
+                "signals": {"title": 1.0, "abstract": 1.0, "author": True},
+                "newer": "same",
+                "suggestion": "内容完全一致，建议直接保留库里这一版",
+                "diff": {},
+                "incoming_meta": {"title": old["title"], "n_pages": n_pages, "n_chars": 0,
+                                  "n_refs": 0, "n_figures": 0, "n_tables": 0},
+                "staged": _stage(src, name),
+            }
+        if on_duplicate == "replace":
+            struct = parse_pdf(src)
+            for row in exact:
+                delete_paper(row["id"])
+            return _insert(struct, src, name, sha, sig)
+        return _insert(parse_pdf(src), src, name, sha, sig)
+
     struct = parse_pdf(src)
 
     dupes: list[dict] = []
@@ -137,13 +181,14 @@ def _stage(src: Path, name: str) -> str:
     from .config import DATA_DIR
     st = DATA_DIR / "staging"
     st.mkdir(parents=True, exist_ok=True)
-    dst = st / f"{abs(hash(name)) % (10**10)}_{name}"
+    dst = st / f"{abs(hash(f'{name}|{src.stat().st_size}')) % (10**10)}_{name}"
     if src.resolve() != dst.resolve():
         shutil.copy2(src, dst)
     return str(dst)
 
 
 def _insert(struct: dict, src: Path, name: str, sha: str, sig: list[int]) -> dict:
+    name = _unique_pdf_name(name)
     dst = PDF_DIR / name
     if src.resolve() != dst.resolve():
         shutil.copy2(src, dst)
@@ -164,9 +209,12 @@ def _insert(struct: dict, src: Path, name: str, sha: str, sig: list[int]) -> dic
     return {"status": "ingested", "id": pid, "meta": meta, "name": name}
 
 
-def stage_ingest(staged_path: str, name: str) -> dict:
+def stage_ingest(staged_path: str, name: str, replace_id: int | None = None) -> dict:
+    """确认入库。replace_id 非空表示用户选了「保留新版」，先删掉库里旧版再入。"""
+    struct = parse_pdf(staged_path)                    # 先解析成功，再删旧版，避免解析失败把旧记录也丢了
+    if replace_id:
+        delete_paper(int(replace_id))
     sha, sig = content_fingerprint(staged_path)
-    struct = parse_pdf(staged_path)
     return _insert(struct, Path(staged_path), name, sha, sig)
 
 

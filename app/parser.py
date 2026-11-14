@@ -5,6 +5,7 @@ import hashlib
 import re
 import statistics
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,7 @@ NUM_PREFIX = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+(\S.*)$")
 NUM_ONLY = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?$")
 ARXIV_STAMP = re.compile(r"^arxiv:\s*\d{4}\.\d{4,5}(v\d+)?\s*\[", re.I)
 FIG_CAP = re.compile(r"^(figure|fig\.|table|图|表)\s*[0-9一二三四五六七八九十]+[.:：]?", re.I)
+TAB_CAP = re.compile(r"(?im)^\s*(?:table|表)\s*[0-9一二三四五六七八九十]+", re.I)
 REF_ITEM = re.compile(r"^\[?(\d{1,3})\]?\s*(?:[\.\)、]\s*)?")
 GITHUB = re.compile(r"github\.com/[A-Za-z0-9_.-]+", re.I)
 
@@ -372,6 +374,38 @@ def _guess_year(doc, page1_text: str, blocks: list[dict]) -> str:
 
 
 
+def _detect_tables(path: str | Path, page_numbers: list[int], workers: int = 4) -> list[dict]:
+    """表格识别单页约 1 秒，候选页分给几个线程并行跑，每个线程自己开一个文档句柄。"""
+    if not page_numbers:
+        return []
+
+    def work(nos: list[int]) -> list[dict]:
+        out: list[dict] = []
+        doc = fitz.open(str(path))
+        try:
+            for pno in nos:
+                try:
+                    for t in doc[pno].find_tables().tables:
+                        rows = t.extract()
+                        cells = [[(c or "").strip() for c in row] for row in rows if row]
+                        if sum(1 for row in cells for c in row if c) < 3:
+                            continue
+                        out.append({"page": pno + 1, "bbox": [round(v, 1) for v in t.bbox], "rows": cells})
+                except Exception:
+                    continue
+        finally:
+            doc.close()
+        return out
+
+    n = max(1, min(workers, len(page_numbers)))
+    parts = [page_numbers[i::n] for i in range(n)]
+    tables: list[dict] = []
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        for part in ex.map(work, parts):
+            tables.extend(part)
+    return sorted(tables, key=lambda t: t["page"])
+
+
 def parse_pdf(path: str | Path) -> dict[str, Any]:
     doc = fitz.open(str(path))
     n_pages = doc.page_count
@@ -381,6 +415,8 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
     tables: list[dict] = []
     figures: list[dict] = []
     ocr_pages: list[int] = []
+    prev_table_cap = False
+    table_pages: list[int] = []
 
     for pno in range(n_pages):
         page = doc[pno]
@@ -414,15 +450,13 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
         pages.append({"n": pno + 1, "w": round(pw, 1), "h": round(ph, 1), "columns": ncol,
                       "blocks": [{"bbox": b["bbox"], "text": b["text"], "size": b["size"]} for b in ordered]})
 
-        try:
-            for t in page.find_tables().tables:
-                rows = t.extract()
-                cells = [[(c or "").strip() for c in row] for row in rows if row]
-                if sum(1 for row in cells for c in row if c) < 3:
-                    continue
-                tables.append({"page": pno + 1, "bbox": [round(v, 1) for v in t.bbox], "rows": cells})
-        except Exception:
-            pass
+        # 表格识别很吃时间（整页扫描版面，约 1 秒/页），只把「本页或上一页出现 Table N / 表 N 题注」
+        # 的页收进候选，再并行识别；跨页表格靠「上一页有题注」这一条件兜住。
+        page_text = "\n".join(b["text"] for b in blocks)
+        has_table_cap = bool(TAB_CAP.search(page_text))
+        if has_table_cap or prev_table_cap:
+            table_pages.append(pno)
+        prev_table_cap = has_table_cap
 
         try:
             for img in page.get_images(full=True):
@@ -442,6 +476,8 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
             pass
 
     body_size = font_counter.most_common(1)[0][0] if font_counter else 10.0
+    if table_pages:
+        tables = _detect_tables(path, table_pages)
     raw_blocks = _merge_number_headings(raw_blocks)
     page1_blocks = [b for b in raw_blocks if b["page"] == 1]
     page1_text = "\n".join(b["text"] for b in page1_blocks[:40])

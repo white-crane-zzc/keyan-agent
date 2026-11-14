@@ -85,47 +85,57 @@ dz.ondrop = e => {
 $('#fileInput').onchange = e => { if (e.target.files.length) uploadFiles(e.target.files); };
 
 async function uploadFiles(fileList) {
-  const fd = new FormData();
-  Array.from(fileList).forEach(f => fd.append('files', f));
-  fd.append('on_duplicate', 'ask');
-  $('#uploadLog').textContent = `上传 ${fileList.length} 个文件…`;
-  try {
-    const data = await api('/api/upload', { method: 'POST', body: fd });
-    const lines = [];
-    for (const r of data.results) {
-      if (r.status === 'ingested') lines.push(`✅ ${r.name}：${r.meta.title}（${r.meta.n_pages} 页，${r.meta.n_refs} 篇参考文献）`);
-      else if (r.status === 'duplicate') {
-        lines.push(await askDuplicate(r));
-      } else lines.push(`❌ ${r.name}：${r.message}`);
+  // 逐个上传：每传完一个就把结果写进日志，长文档解析时也能看到进度，不会停在「上传中」没反应
+  const files = Array.from(fileList);
+  const lines = [];
+  const flush = extra => { $('#uploadLog').textContent = lines.concat(extra ? [extra] : []).join('\n'); };
+  for (let i = 0; i < files.length; i++) {
+    flush(`⏳ 正在处理 ${i + 1}/${files.length}：${files[i].name}（大文档解析需要时间，请稍候）`);
+    const fd = new FormData();
+    fd.append('files', files[i]);
+    fd.append('on_duplicate', 'ask');
+    try {
+      const data = await api('/api/upload', { method: 'POST', body: fd });
+      for (const r of data.results) {
+        if (r.status === 'ingested') lines.push(`✅ ${r.name}：${r.meta.title}（${r.meta.n_pages} 页，${r.meta.n_refs} 篇参考文献）`);
+        else if (r.status === 'duplicate') lines.push(await askDuplicate(r));
+        else lines.push(`❌ ${r.name}：${r.message}`);
+      }
+    } catch (e) {
+      lines.push(`❌ ${files[i].name}：上传失败（${e.message}）`);
     }
-    $('#uploadLog').textContent = lines.join('\n');
-    loadLibrary();
-  } catch (e) {
-    $('#uploadLog').textContent = '上传失败：' + e.message;
+    flush();
   }
+  loadLibrary();
 }
 
 // 重复文件处理：展示差异，让用户选保留哪版
 function askDuplicate(r) {
   return new Promise(resolve => {
-    const diff = r.diff;
-    const msg = [
-      `检测到内容重复：《${r.existing.title}》（相似度 ${(r.similarity * 100).toFixed(0)}%）`,
+    const diff = r.diff || {};
+    const lines = [
+      r.exact
+        ? `库里已有一份内容完全相同的 PDF：《${r.existing.title}》`
+        : `检测到同一篇论文的另一版：《${r.existing.title}》（相似度 ${(r.similarity * 100).toFixed(0)}%）`,
       `库里已有：${r.existing.meta.n_pages} 页 / ${r.existing.meta.n_chars} 字符 / ${r.existing.meta.n_refs} 篇参考文献`,
-      `新上传：${r.incoming_meta.n_pages} 页 / ${r.incoming_meta.n_chars} 字符 / ${r.incoming_meta.n_refs} 篇参考文献`,
-      `章节新增：${(diff.sections_added || []).join('、') || '无'}`,
-      `章节删除：${(diff.sections_removed || []).join('、') || '无'}`,
-      `结论：${r.suggestion}`,
-      '',
-      '确定 = 保留新版本（覆盖库里旧版）',
-      '取消 = 两个版本都保留（并存）',
-    ].join('\n');
+    ];
+    if (!r.exact) {
+      lines.push(`新上传：${r.incoming_meta.n_pages} 页 / ${r.incoming_meta.n_chars} 字符 / ${r.incoming_meta.n_refs} 篇参考文献`);
+      lines.push(`章节新增：${(diff.sections_added || []).join('、') || '无'}`);
+      lines.push(`章节删除：${(diff.sections_removed || []).join('、') || '无'}`);
+    } else {
+      lines.push(`新上传：${r.incoming_meta.n_pages} 页（同名文件，内容一致）`);
+    }
+    lines.push(`结论：${r.suggestion}`, '',
+      '确定 = 用新上传的这份替换库里旧版（旧版删除）',
+      '取消 = 两个都保留（并存，自动改名不覆盖）');
+    const msg = lines.join('\n');
     const useNew = confirm(msg);
     const action = useNew ? 'keep_new' : 'keep_both';
     api('/api/upload/confirm', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staged: r.staged, name: r.existing.filename, action }),
-    }).then(() => resolve(`↻ ${r.existing.title}：已按「${useNew ? '保留新版' : '两个都留'}」处理`))
+      body: JSON.stringify({ staged: r.staged, name: r.existing.filename, action, existing_id: r.existing.id }),
+    }).then(res => resolve(`↻ ${r.existing.title}：${useNew ? '已替换为上传的新版' : `已并存（${res.name || '两个版本都保留'}）`}`))
       .catch(e => resolve('重复处理失败：' + e.message));
   });
 }

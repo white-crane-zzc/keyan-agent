@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from . import arxiv, graph as graphmod, llm, pipeline
 from .config import DB_PATH, LLM_MODEL, PAGE_DIR, PLOT_DIR, STATIC_DIR, TOP_K, llm_ready
@@ -156,9 +157,13 @@ async def upload(files: list[UploadFile] = File(...), on_duplicate: str = Form("
         with open(tmp, "wb") as out:
             shutil.copyfileobj(f.file, out)
         try:
-            results.append(pipeline.ingest(tmp, Path(f.filename).name, on_duplicate))
+            results.append(await run_in_threadpool(
+                pipeline.ingest, tmp, Path(f.filename).name, on_duplicate))
         except Exception as e:
             results.append({"status": "error", "name": f.filename, "message": str(e)})
+        finally:
+            if tmp.exists():                       # 已入库或已转存 staging，临时副本可以删了
+                tmp.unlink()
     INDEX.version = -1
     return {"results": results}
 
@@ -167,14 +172,18 @@ async def upload(files: list[UploadFile] = File(...), on_duplicate: str = Form("
 def upload_confirm(payload: dict = Body(...)) -> dict:
     staged = payload.get("staged")
     name = payload.get("name")
-    action = payload.get("action", "cancel")
+    action = payload.get("action", "cancel")          # cancel | keep_new | keep_both
+    existing_id = payload.get("existing_id")
     if action == "cancel":
         if staged and Path(staged).exists():
             Path(staged).unlink()
         return {"status": "cancelled"}
     if not staged or not Path(staged).exists():
         raise HTTPException(404, "待确认文件已不存在")
-    res = pipeline.stage_ingest(staged, name)
+    replace_id = int(existing_id) if (action == "keep_new" and existing_id) else None
+    res = pipeline.stage_ingest(staged, name, replace_id)
+    if Path(staged).exists():
+        Path(staged).unlink()                          # 已入库，清掉暂存副本
     INDEX.version = -1
     return res
 
