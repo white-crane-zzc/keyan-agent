@@ -15,8 +15,10 @@ docs/*.docx
 *.zip
 
 # 文档生成与复核时的临时产物
-docs/_pdfcheck/
+docs/_pdfcheck*/
+docs/_check*/
 docs/_imgex/
 docs/_tmp_figs/
 docs/_req_slices*/
-docs/_probe.pdf
+docs/_pdftext.txt
+docs/_probe*.pdf

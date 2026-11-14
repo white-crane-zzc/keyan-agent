@@ -9,8 +9,8 @@
 | 交付项 | 位置 |
 |---|---|
 | 代码仓库（Public） | https://github.com/white-crane-zzc/keyan-agent ，分支 `main`，含自初始化至今的完整提交历史 |
-| 源码包 | `keyan-agent-code-1.0.zip`（74 文件 / 78.1 MB，含库数据与论文原件；不含成品文档与演示视频） |
-| 作品文档 | 《科研小助手 Agent — 作品介绍与技术文档》PDF（17 页），按提交表单第 6 项与需求 3.3 单独上传，不随源码包分发 |
+| 源码包 | `keyan-agent-code-1.0.zip`（72 文件 / 78.1 MB，含库数据与论文原件；不含成品文档与演示视频） |
+| 作品文档 | 两份 PDF：《科研小助手 Agent — 技术文档》（10 页，系统设计与 AI 技术方案）、《科研小助手 Agent — 作品介绍文档》（9 页，项目详情、亮点、关键技术、实测与运行截图）；分别由 `docs/make_tech_pdf.py`、`docs/make_overview_pdf.py` 生成，成品 PDF 不随源码包分发 |
 | 演示视频 | 5–8 分钟 / MP4 / 1080p，由作者录制后上传 B 站、抖音等公开平台，不随源码包分发 |
 | 环境配置 | `requirements.txt`（依赖清单）、`.env.example`（环境变量模板）、`启动.cmd`、`run.ps1` |
 | 在线演示 | 未提供公网演示（单机本地部署、无鉴权）；本地运行在 `http://127.0.0.1:8000` |
@@ -118,7 +118,7 @@ Copy-Item .env.example .env
 ├─ static/         # 六页签前端（文库/阅读/问答/图谱/写作/推荐）
 ├─ data/           # pdf、解析索引、页面渲染、图表、SQLite（不入库）
 ├─ tests/          # e2e_test.py（接口级）、ui_flow.py（浏览器交互级）
-├─ docs/           # 技术文档
+├─ docs/           # 技术文档与作品介绍文档的生成脚本（make_tech_pdf.py / make_overview_pdf.py）
 └─ 启动.cmd / run.ps1 / .env.example / requirements.txt
 ```
 
