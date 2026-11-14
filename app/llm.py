@@ -1,6 +1,8 @@
 """大模型接入层：OpenAI 兼容协议（云端 API 或本地 Ollama 的 /v1 均可）。"""
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from .config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT, llm_ready
@@ -96,6 +98,34 @@ def diagram(desc: str) -> str:
             "只输出 mermaid 代码块，节点命名简洁，不要解释。"
         )},
     ], temperature=0.2, max_tokens=1200)
+
+
+def search_terms(question: str) -> str:
+    """把中文问题压成一行英文检索关键词（用于跨语言检索召回）。"""
+    return chat([
+        {"role": "system", "content": "你是检索式生成器。"},
+        {"role": "user", "content": (
+            f"问题：{question}\n\n输出一行英文检索关键词（3-8 个词，空格分隔），"
+            "覆盖问题里的学术术语与同义词，不要解释，不要标点。"
+        )},
+    ], temperature=0.1, max_tokens=60).replace("\n", " ").strip()
+
+
+def rerank(question: str, candidates: list[dict], keep: int = 8) -> list[int]:
+    """让模型从候选片段里挑出与问题最相关的编号（跨语言语义匹配，弥补 BM25 词面不足）。"""
+    lines = []
+    for i, c in enumerate(candidates, 1):
+        body = " ".join(c["text"].split())[:150]
+        lines.append(f"{i}. p{c['page']} [{c['section'][:26]}] {body}")
+    prompt = (
+        f"问题：{question}\n\n候选片段：\n" + "\n".join(lines) +
+        f"\n\n请选出最能回答该问题的片段编号（最多 {keep} 个），按相关度从高到低，"
+        "只输出编号，用英文逗号分隔，不要解释。"
+    )
+    raw = chat([{"role": "system", "content": "你是检索重排器，只输出编号。"},
+                {"role": "user", "content": prompt}], temperature=0.0, max_tokens=80)
+    nums = [int(x) for x in re.findall(r"\d+", raw)]
+    return [n for n in nums if 1 <= n <= len(candidates)][:keep]
 
 
 def figure_caption(desc: str, stats: str) -> str:

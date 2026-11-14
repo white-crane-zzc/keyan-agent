@@ -416,6 +416,20 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
 
     refs_start, refs_end = _find_refs_section(raw_blocks)
 
+    # 参考文献之后常跟着附录（超参数、补充实验、注意力可视化），附录不能被当成参考文献丢掉
+    appendix_start = None
+    if refs_start >= 0:
+        for i in range(refs_start + 1, len(raw_blocks)):
+            t = re.sub(r"\s+", " ", raw_blocks[i]["text"]).strip()
+            if not (2 < len(t) < 70) or REF_ITEM.match(t):
+                continue
+            # 附录标题：字号明显大于正文的短行（带不带 "A." / "Appendix" 前缀都算）
+            if heading_level(t, raw_blocks[i]["size"], body_size, raw_blocks[i]["bold"]):
+                appendix_start = i
+                break
+    if appendix_start is not None:
+        refs_end = appendix_start
+
     outline: list[dict] = []
     chunks: list[dict] = []
     abstract_parts: list[str] = []
@@ -468,6 +482,15 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
         cand = _parse_refs(tail_lines)
         if len(cand) > len(refs):
             refs = cand
+
+    # 表格内容单独入块：超参数表、结果表也要能被检索到
+    for t in tables:
+        body = "\n".join(" | ".join(c for c in row if c) for row in t["rows"])
+        if len(body) < 12:
+            continue
+        sec = next((h["title"] for h in outline if h["page"] <= t["page"]), "Table")
+        for piece in _split_sentences(body, CHUNK_MAX_CHARS):
+            chunks.append({"page": t["page"], "section": f"{sec} (表格)", "text": piece, "kind": "table"})
 
     n_chars = sum(len(c["text"]) for c in chunks)
     meta = {

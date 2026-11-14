@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,12 +49,14 @@ ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF = "https://arxiv.org/pdf/"
 
 
-_PLACEHOLDER_HINTS = ("在这里", "你的key", "你的方舟key", "sk-xxx", "xxx", "your-key", "<")
+_PLACEHOLDER_HINTS = ("sk-xxx", "your-key", "sk-key")
 
 
 def llm_ready() -> bool:
-    """是否配置了大模型。本地 Ollama 不需要 key；占位文本不算配置。"""
+    """是否配置了大模型。本地 Ollama 不需要 key；模板占位文本不算配置。"""
     local = "localhost" in LLM_BASE_URL or "127.0.0.1" in LLM_BASE_URL
     key = LLM_API_KEY
-    valid_key = bool(key) and len(key) >= 8 and not any(h in key for h in _PLACEHOLDER_HINTS)
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", key))   # 占位串里带中文，真 key 不会
+    valid_key = bool(key) and len(key) >= 8 and not has_cjk \
+        and not any(key.lower().startswith(h) for h in _PLACEHOLDER_HINTS)
     return valid_key or local

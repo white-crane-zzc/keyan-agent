@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from . import arxiv, graph as graphmod, llm, pipeline
 from .config import DB_PATH, LLM_MODEL, PAGE_DIR, PLOT_DIR, STATIC_DIR, TOP_K, llm_ready
 from .db import exec_, init_db, one, q
-from .search import INDEX, build_context
+from .search import INDEX, build_context, expand_by_section, expand_query, hybrid_search, section_cover
 
 app = FastAPI(title="科研小助手 Agent", version="1.0")
 
@@ -186,7 +186,45 @@ def ask(payload: dict = Body(...)) -> dict:
     top_k = int(payload.get("top_k") or TOP_K)
     if not question:
         raise HTTPException(400, "问题不能为空")
-    hits = INDEX.search(question, k=top_k, paper_ids=paper_ids or None)
+    extras = expand_query(question)
+    if llm_ready() and any("\u4e00" <= ch <= "\u9fff" for ch in question):
+        try:  # 有模型时用模型把中文问题压成英文检索式，跨语言召回更准
+            terms = llm.search_terms(question)
+            if terms:
+                extras.insert(0, terms)
+        except llm.LLMUnavailable:
+            pass
+    cover = list(paper_ids)
+    if len(cover) < 2 and re.search(r"对比|区别|不同|相比|差异|比较", question):
+        cover = [row["id"] for row in q("SELECT id FROM papers ORDER BY id")]
+    hits = hybrid_search(question, k=top_k, paper_ids=paper_ids or None,
+                         extra_queries=extras, cover_papers=cover if len(cover) > 1 else None)
+    hits = expand_by_section(hits)
+    if len(paper_ids) == 1:  # 单篇问题再补一章一块，覆盖全文各章节
+        seen = {(h["paper_id"], h["page"], h["text"][:60]) for h in hits}
+        for h in section_cover(paper_ids[0], question, extras):
+            key = (h["paper_id"], h["page"], h["text"][:60])
+            if key not in seen:
+                hits.append(h)
+                seen.add(key)
+    if llm_ready() and len(hits) > top_k:
+        # 候选多时让模型按语义重排（中文问英文表格全靠这一步）
+        cand = hybrid_search(question, k=30, paper_ids=paper_ids or None, extra_queries=extras)
+        seen = {(h["paper_id"], h["page"], h["text"][:60]) for h in hits}
+        for h in cand:
+            key = (h["paper_id"], h["page"], h["text"][:60])
+            if key not in seen:
+                hits.append(h)
+                seen.add(key)
+        pool = hits[:30]
+        try:
+            idxs = llm.rerank(question, pool, keep=top_k)
+            if idxs:
+                picked = [pool[i - 1] for i in idxs]
+                rest = [h for h in pool if h not in picked]
+                hits = picked + rest[:max(0, top_k - len(picked))]
+        except llm.LLMUnavailable:
+            hits = hits[:top_k]
     if not hits:
         return {"answer": "文库里没有检索到相关内容，请先上传论文。", "citations": [], "hits": []}
     context, cites = build_context(hits)
