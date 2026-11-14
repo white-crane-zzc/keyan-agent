@@ -51,8 +51,32 @@ def _pagerank(G: nx.DiGraph, alpha: float = 0.85, iters: int = 60) -> dict[int, 
 
 def build_graph(paper_ids: list[int] | None = None) -> dict[str, Any]:
     papers = [dict(r) for r in q("SELECT id,title,year,n_pages,authors FROM papers")]
+    note = ""
     if paper_ids:
-        papers = [p for p in papers if p["id"] in paper_ids]
+        if len(paper_ids) >= 2:
+            papers = [p for p in papers if p["id"] in paper_ids]
+        else:
+            # 只勾 1 篇时，图谱只有一个点、没有边，等于没画面。
+            # 先补它的 1 跳邻居（它引用的 / 引用它的），邻居还是凑不出就退回全库。
+            all_papers = papers
+            seed = next((p for p in all_papers if p["id"] == paper_ids[0]), None)
+            if seed:
+                refs = [dict(r) for r in q("SELECT paper_id,title,raw FROM refs")]
+                neigh = set()
+                for r in refs:
+                    if r["paper_id"] == seed["id"]:
+                        for p in all_papers:
+                            if p["id"] != seed["id"] and _title_match(r["title"] or r["raw"], p["title"]):
+                                neigh.add(p["id"])
+                    elif _title_match(r["title"] or r["raw"], seed["title"]):
+                        neigh.add(r["paper_id"])
+                neigh.discard(seed["id"])
+                if neigh:
+                    papers = [seed] + [p for p in all_papers if p["id"] in neigh]
+                    note = f"只勾选了 1 篇，已自动补上它的直接引用邻居（共 {len(papers)} 篇）"
+                else:
+                    papers = all_papers
+                    note = "只勾选了 1 篇且库内没有它的直接引用邻居，已改为全库图谱"
     ids = {p["id"] for p in papers}
     refs = [dict(r) for r in q("SELECT paper_id,title,raw,arxiv_id,year FROM refs")]
 
@@ -104,7 +128,7 @@ def build_graph(paper_ids: list[int] | None = None) -> dict[str, Any]:
         nodes.append({"id": p["id"], "title": p["title"], "year": p["year"],
                       "in": m["in"], "out": m["out"], "pagerank": m["pagerank"], "role": role})
 
-    core = [n for n in nodes if n["role"] == "基石"] or sorted(nodes, key=lambda n: -n["pagerank"])[:1]
+    core = [n for n in nodes if n["role"] == "基石"]
     peripheral = [n for n in nodes if n["in"] == 0 and n["out"] > 0]
     return {
         "nodes": nodes,
@@ -113,6 +137,7 @@ def build_graph(paper_ids: list[int] | None = None) -> dict[str, Any]:
         "peripheral": [c["id"] for c in peripheral],
         "external_top": sorted(external.items(), key=lambda kv: -kv[1])[:10],
         "stats": {"papers": len(nodes), "internal_edges": len(edges)},
+        "note": note,
     }
 
 

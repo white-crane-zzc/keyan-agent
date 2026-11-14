@@ -457,14 +457,16 @@ $('#btnBuildGraph').onclick = async () => {
     body: JSON.stringify({ paper_ids: Array.from(state.selected) }),
   });
   drawGraph(data);
-  $('#coreList').innerHTML = data.core.map(id => {
+  $('#graphNote').textContent = data.note || `当前图谱：${data.nodes.length} 篇 / ${data.edges.length} 条引用边`;
+  const coreBox = $('#coreList');
+  coreBox.innerHTML = data.core.length ? data.core.map(id => {
     const n = data.nodes.find(x => x.id === id);
     return n ? `<li data-pid="${n.id}">${escapeHtml(n.title.slice(0, 44))}（被引 ${n.in}）</li>` : '';
-  }).join('');
-  $('#periphList').innerHTML = data.peripheral.map(id => {
+  }).join('') : '<li class="hint">没有能判定的基石论文：选中的论文之间没有互相引用</li>';
+  $('#periphList').innerHTML = data.peripheral.length ? data.peripheral.map(id => {
     const n = data.nodes.find(x => x.id === id);
     return n ? `<li data-pid="${n.id}">${escapeHtml(n.title.slice(0, 44))}（引出 ${n.out}）</li>` : '';
-  }).join('');
+  }).join('') : '<li class="hint">没有边缘论文</li>';
   $('#extList').innerHTML = data.external_top.map(([t, c]) => `<li>${escapeHtml(t.slice(0, 46))}（${c}）</li>`).join('');
   $$('.graph-side li').forEach(li => {
     if (li.dataset.pid) li.onclick = () => openReader(Number(li.dataset.pid));
@@ -474,7 +476,7 @@ $('#btnBuildGraph').onclick = async () => {
 function drawGraph(data) {
   const svg = $('#graphSvg');
   const W = Math.max(760, Math.round(svg.clientWidth || 900) - 40);
-  const H = 560;
+  const H = 620;
   const nodes = data.nodes.map((n, i) => ({
     ...n,
     x: W / 2 + Math.cos(i / data.nodes.length * 6.28) * 220,
@@ -490,7 +492,7 @@ function drawGraph(data) {
         if (a === b) return;
         let dx = a.x - b.x, dy = a.y - b.y;
         let d2 = dx * dx + dy * dy + 0.01;
-        const f = 90000 / d2;
+        const f = 150000 / d2;
         a.vx += dx * f / Math.sqrt(d2);
         a.vy += dy * f / Math.sqrt(d2);
       });
@@ -500,7 +502,7 @@ function drawGraph(data) {
       if (!a || !b) return;
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const f = (d - 190) * 0.005;
+      const f = (d - 230) * 0.005;
       a.vx += dx / d * f; a.vy += dy / d * f;
       b.vx -= dx / d * f; b.vy -= dy / d * f;
     });
@@ -516,10 +518,24 @@ function drawGraph(data) {
     if (!a || !b) return;
     out += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#dfe4ee" stroke-width="1.2" marker-end="url(#ar)"/>`;
   });
-  nodes.forEach(n => {
+  const showAllLabels = data.nodes.length <= 12;
+  nodes.forEach((n, i) => {
     const r = 7 + Math.min(n.in, 8) * 1.6;
-    out += `<g data-pid="${n.id}"><circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${color(n)}" opacity=".9"/>`;
-    out += `<text x="${n.x + r + 3}" y="${n.y + 4}" font-size="11" fill="#39425280">${escapeHtml(n.title.slice(0, 26))}</text></g>`;
+    // 节点多时只标基石/边缘，其余靠悬停看全名，避免标签糊成一片
+    const labelled = showAllLabels || n.role !== '中间';
+    const label = n.title.length > 16 ? n.title.slice(0, 16) + '…' : n.title;
+    const est = label.length * 5.4;
+    let left = n.x > W / 2;
+    if (!left && n.x + r + 6 + est > W - 6) left = true;
+    if (left && n.x - r - 6 - est < 6) left = false;
+    const tx = left ? n.x - r - 4 : n.x + r + 4;
+    const anchor = left ? 'end' : 'start';
+    out += `<g data-pid="${n.id}"><title>${escapeHtml(n.title)}（被引 ${n.in} / 引出 ${n.out}）</title>`;
+    out += `<circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${color(n)}" opacity=".9"/>`;
+    if (labelled) {
+      out += `<text x="${tx}" y="${n.y + 4}" text-anchor="${anchor}" font-size="10" fill="#39425290">${escapeHtml(label)}</text>`;
+    }
+    out += `</g>`;
   });
   svg.innerHTML = out;
   $$('g', svg).forEach(g => g.style.cursor = 'pointer');
