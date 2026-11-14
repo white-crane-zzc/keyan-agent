@@ -24,6 +24,28 @@ app = FastAPI(title="科研小助手 Agent", version="1.0")
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    _start_refresh_job()
+
+
+def _start_refresh_job() -> None:
+    """定期刷新 arXiv 推荐（默认 6 小时一次，结果落库，前端推荐页直接读缓存）。"""
+    import os
+    import threading
+    import time
+
+    hours = float(os.getenv("RECOMMEND_REFRESH_HOURS", "6") or 6)
+    if hours <= 0:
+        return
+
+    def loop():
+        while True:
+            try:
+                arxiv.recommend(8)
+            except Exception:
+                pass
+            time.sleep(hours * 3600)
+
+    threading.Thread(target=loop, daemon=True, name="arxiv-refresh").start()
 
 
 @app.get("/api/status")
@@ -67,9 +89,11 @@ def paper_struct(pid: int) -> dict:
     if not st:
         raise HTTPException(404, "没有该论文的解析结果")
     row = one("SELECT * FROM papers WHERE id=?", (pid,))
+    refs = q("SELECT raw, title, authors, year, arxiv_id FROM refs WHERE paper_id=? ORDER BY id", (pid,))
     return {"meta": json.loads(row["meta_json"] or "{}"), "outline": st["outline"],
             "abstract": st.get("meta", {}).get("abstract", ""),
             "counts": {k: st["meta"][k] for k in ("n_tables", "n_figures", "n_refs")},
+            "refs": [dict(r) for r in refs],
             "tables": st["tables"][:6], "figures": st["figures"][:6]}
 
 
@@ -439,6 +463,105 @@ def recommend(payload: dict = Body(default={})) -> dict:
 def feedback(payload: dict = Body(...)) -> dict:
     arxiv.feedback(payload["arxiv_id"], payload.get("verdict", "like"))
     return {"ok": True}
+
+
+# ---------------- 重排导出（Markdown / HTML） ----------------
+def _paper_markdown(pid: int) -> str:
+    row = one("SELECT id, title, authors, year, filename FROM papers WHERE id=?", (pid,))
+    if not row:
+        raise HTTPException(404, "没有这篇论文")
+    meta = json.loads(one("SELECT meta_json FROM papers WHERE id=?", (pid,))["meta_json"] or "{}")
+    lines = [f"# {row['title'] or row['filename']}", ""]
+    if row["authors"]:
+        lines += [f"**作者**：{row['authors']}", ""]
+    if row["year"]:
+        lines += [f"**年份**：{row['year']}", ""]
+    if meta.get("abstract"):
+        lines += ["## 摘要", "", meta["abstract"], ""]
+    chunks = q("SELECT page, section, text FROM chunks WHERE paper_id=? AND section != '参考文献' "
+               "ORDER BY page, id", (pid,))
+    cur = None
+    for c in chunks:
+        sec = c["section"] or "正文"
+        if sec != cur:
+            lines += ["", f"## {sec}", ""]
+            cur = sec
+        lines += [c["text"], ""]
+    refs = q("SELECT raw, title, year FROM refs WHERE paper_id=? ORDER BY id", (pid,))
+    if refs:
+        lines += ["", "## 参考文献", ""]
+        for i, r in enumerate(refs, 1):
+            lines.append(f"[{i}] {r['raw'] or r['title']}")
+    return "\n".join(lines)
+
+
+@app.get("/api/papers/{pid}/export")
+def export_paper(pid: int, fmt: str = "md"):
+    md = _paper_markdown(pid)
+    row = one("SELECT title, filename FROM papers WHERE id=?", (pid,))
+    stem = re.sub(r"[^\w\u4e00-\u9fa5.-]+", "_", (row["title"] or row["filename"])[:60]) or f"paper_{pid}"
+    if fmt == "html":
+        import html as _html
+        body = []
+        for line in md.split("\n"):
+            if line.startswith("## "):
+                body.append(f"<h2>{_html.escape(line[3:])}</h2>")
+            elif line.startswith("# "):
+                body.append(f"<h1>{_html.escape(line[2:])}</h1>")
+            elif line.strip():
+                body.append(f"<p>{_html.escape(line)}</p>")
+        page = ("<!doctype html><html lang='zh'><meta charset='utf-8'>"
+                f"<title>{_html.escape(row['title'] or '')}</title>"
+                "<style>body{max-width:820px;margin:40px auto;font:16px/1.75 system-ui,"
+                "'Segoe UI',sans-serif;color:#222}h1{font-size:26px}h2{font-size:19px;"
+                "margin-top:28px;border-bottom:1px solid #eee;padding-bottom:6px}</style>"
+                f"<body>{''.join(body)}</body></html>")
+        return Response(page, media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{stem}.html"'})
+    return Response(md, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{stem}.md"'})
+
+
+# ---------------- 按参考文献批量下载 + 引用价值筛选 ----------------
+@app.post("/api/refs/batch")
+def refs_batch(payload: dict = Body(...)) -> dict:
+    pid = int(payload.get("paper_id") or 0)
+    limit = int(payload.get("limit") or 20)
+    do_download = bool(payload.get("download"))
+    rows = q("SELECT id, raw, title, year, arxiv_id FROM refs WHERE paper_id=? ORDER BY id", (pid,))
+    if not rows:
+        raise HTTPException(404, "该论文没有解析出参考文献")
+    # 正文里 [n] 被引次数：只出现一次的多半是"为引用而引用"（凑数引用）
+    body = "\n".join(c["text"] for c in q(
+        "SELECT text FROM chunks WHERE paper_id=? AND section != '参考文献'", (pid,)))
+    counts = {}
+    for m in re.finditer(r"\[(\d{1,3})\]", body):
+        n = int(m.group(1))
+        counts[n] = counts.get(n, 0) + 1
+    items = []
+    for i, r in enumerate(rows, 1):
+        cnt = counts.get(i, 0)
+        verdict, reason = "保留", ""
+        if cnt == 0:
+            verdict, reason = "存疑", "正文没有引用编号，可能是解析误并入或未被引用"
+        elif cnt == 1:
+            verdict, reason = "存疑", "全文仅引用 1 次，疑似凑数引用"
+        items.append({"n": i, "title": r["title"] or (r["raw"] or "")[:90], "year": r["year"],
+                      "arxiv_id": r["arxiv_id"], "cited": cnt, "verdict": verdict, "reason": reason})
+    picked = [it for it in items if it["verdict"] == "保留" and it["arxiv_id"]][:limit]
+    downloaded, failed = [], []
+    if do_download:
+        for it in picked:
+            aid = it["arxiv_id"]
+            try:
+                arxiv.download(aid)
+                downloaded.append(aid)
+            except Exception as e:
+                failed.append(f"{aid}: {e}")
+    return {"total": len(items), "cited_only_once": sum(1 for it in items if it["cited"] == 1),
+            "not_cited": sum(1 for it in items if it["cited"] == 0),
+            "items": items[:60], "download_candidates": [it["arxiv_id"] for it in picked],
+            "downloaded": downloaded, "failed": failed}
 
 
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

@@ -183,7 +183,7 @@ function openReader(pid) {
 }
 
 async function loadReader(pid) {
-  state.reader = { pid, page: 1, total: 1, struct: null, trans: new Map() };
+  state.reader = { pid, page: 1, total: 1, struct: null, trans: new Map(), backTo: null, syncing: false };
   const st = await api(`/api/papers/${pid}/struct`);
   state.reader.struct = st;
   const tree = $('#outlineTree');
@@ -199,8 +199,12 @@ async function loadReader(pid) {
   refs.innerHTML = '';
   (st.refs || []).forEach((r, i) => {
     const d = document.createElement('div');
+    d.className = 'ref-item';
+    d.id = `ref-${i + 1}`;
+    d.dataset.n = i + 1;
     d.textContent = `[${i + 1}] ${(r.title || r.raw || '').slice(0, 90)}`;
     d.title = r.raw || '';
+    d.onclick = () => highlightRef(i + 1, false);
     refs.appendChild(d);
   });
   $('#transList').innerHTML = '';
@@ -232,13 +236,21 @@ async function showPage(n) {
     const [x0, y0, x1, y1] = b.bbox;
     const div = document.createElement('div');
     div.className = 'blk';
-    div.textContent = b.text;
+    // 正文里的 [11] 变成可点：跳到参考文献条目，再一键返回原位置
+    div.innerHTML = escapeHtml(b.text).replace(/\[(\d{1,3})\]/g,
+      '<span class="cit" data-n="$1">[$1]</span>');
     div.style.left = (x0 * scale) + 'px';
     div.style.top = (y0 * scale) + 'px';
     div.style.width = ((x1 - x0) * scale) + 'px';
     div.style.height = ((y1 - y0) * scale) + 'px';
     div.style.fontSize = Math.max(6, b.size * scale * 0.98) + 'px';
     div.dataset.text = b.text;
+    div.querySelectorAll('.cit').forEach(c => {
+      c.onclick = ev => {
+        ev.stopPropagation();
+        highlightRef(Number(c.dataset.n), true);
+      };
+    });
     div.onclick = () => highlightTranslation(b.text);
     overlay.appendChild(div);
   });
@@ -253,6 +265,25 @@ async function showPage(n) {
 
 $('#btnPrevPage').onclick = () => { if (state.reader.page > 1) showPage(state.reader.page - 1); };
 $('#btnNextPage').onclick = () => { if (state.reader.page < state.reader.total) showPage(state.reader.page + 1); };
+$('#btnBackFromRef').onclick = backToBody;
+$('#chkCompare').onchange = setupCompare;
+$('#btnExportMd').onclick = () => { if (state.reader.pid) window.open(`/api/papers/${state.reader.pid}/export?fmt=md`); };
+$('#btnExportHtml').onclick = () => { if (state.reader.pid) window.open(`/api/papers/${state.reader.pid}/export?fmt=html`); };
+$('#btnRefAudit').onclick = async () => {
+  const pid = state.reader.pid;
+  if (!pid) return;
+  const box = $('#refAudit');
+  box.textContent = '筛查中…';
+  try {
+    const r = await api('/api/refs/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paper_id: pid, limit: 0, download: false }),
+    });
+    const doubt = (r.items || []).filter(i => i.verdict !== '保留').slice(0, 8);
+    box.innerHTML = `共 ${r.total} 条；仅引用 1 次 ${r.cited_only_once} 条、未被正文引用 ${r.not_cited} 条` +
+      (doubt.length ? '<br>' + doubt.map(i => `[${i.n}] ${escapeHtml(i.title.slice(0, 46))} — ${i.reason}`).join('<br>') : '');
+  } catch (e) { box.textContent = '筛查失败：' + e.message; }
+};
 
 // 划词翻译
 async function quickTranslate(text) {
@@ -313,6 +344,57 @@ function highlightTranslation(text) {
     el.style.background = '#eaf1ff';
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
+}
+
+// ---------- 正文 [n] ↔ 参考文献 双向跳转 ----------
+// 点正文里的 [11]：滚到左侧参考文献第 11 条并高亮，同时记下当前页码与滚动位置
+// 点「返回正文」：回到刚才那一页的同一位置
+function highlightRef(n, fromBody) {
+  const item = document.getElementById(`ref-${n}`);
+  if (!item) return;
+  if (fromBody) {
+    if (!state.reader.backTo) {
+      state.reader.backTo = { page: state.reader.page, top: $('#pagePane').scrollTop };
+      const back = $('#btnBackFromRef');
+      if (back) back.hidden = false;
+    }
+  }
+  $$('#refList .ref-item').forEach(i => i.classList.remove('active'));
+  item.classList.add('active');
+  item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function backToBody() {
+  const b = state.reader.backTo;
+  const back = $('#btnBackFromRef');
+  if (back) back.hidden = true;
+  state.reader.backTo = null;
+  $$('#refList .ref-item').forEach(i => i.classList.remove('active'));
+  if (!b) return;
+  const go = () => { $('#pagePane').scrollTop = b.top || 0; };
+  if (b.page !== state.reader.page) showPage(b.page).then(go);
+  else go();
+}
+
+// ---------- 中英对照：左右联动 + 当前页自动译 ----------
+function setupCompare() {
+  const on = $('#chkCompare').checked;
+  const left = $('#pagePane');
+  const right = $('#transPane');
+  document.body.classList.toggle('compare-on', on);
+  if (!on) return;
+  const ratio = el => el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0;
+  const sync = (src, dst) => {
+    if (state.reader.syncing) return;
+    state.reader.syncing = true;
+    dst.scrollTop = ratio(src) * Math.max(0, dst.scrollHeight - dst.clientHeight);
+    setTimeout(() => { state.reader.syncing = false; }, 60);
+  };
+  left.onscroll = () => sync(left, right);
+  right.onscroll = () => sync(right, left);
+  const page = state.reader.page;
+  const has = Array.from(state.reader.trans.values()).some(i => i.page === page);
+  if (!has) translateRange(page, page);
 }
 
 // ---------- 问答 ----------

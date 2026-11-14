@@ -133,3 +133,16 @@ pre.code { background: #f5f7fb; border: 1px solid var(--line); border-radius: 8p
   .reader-body { grid-template-columns: 1fr; }
   .panel-row, .graph-layout { grid-template-columns: 1fr; }
 }
+
+/* 正文引用上标与参考文献联动 */
+.cit { color: #1f5fd0; cursor: pointer; font-weight: 600; }
+.cit:hover { background: #e8f0ff; border-radius: 2px; }
+.ref-item { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.ref-item:hover { background: var(--accent-2); }
+.ref-item.active { background: #fff2c9; outline: 1px solid #e3c46a; }
+
+/* 中英对照模式：左右两栏同高、各自滚动并联动 */
+body.compare-on .reader-body { grid-template-columns: 240px minmax(0, 1.15fr) minmax(320px, 0.85fr); }
+body.compare-on .trans-pane { border-color: #bcd0f5; }
+/* 阅读页左栏可独立滚动（中英对照联动依赖它） */
+.page-pane { overflow: auto; max-height: calc(100vh - 90px); }

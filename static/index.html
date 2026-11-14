@@ -70,6 +70,8 @@
       <div class="reader-tools">
         <button id="btnTranslatePage">翻译本页</button>
         <button class="ghost" id="btnTranslateAll">翻译全文</button>
+        <button class="ghost" id="btnExportMd">导出 Markdown</button>
+        <button class="ghost" id="btnExportHtml">导出 HTML</button>
         <label class="chk"><input type="checkbox" id="chkCompare" /> 中英对照</label>
       </div>
     </div>
@@ -77,8 +79,10 @@
       <aside class="outline-pane card">
         <h4>大纲导航</h4>
         <div id="outlineTree" class="tree"></div>
-        <h4 style="margin-top:16px">参考文献</h4>
+        <h4 style="margin-top:16px">参考文献 <button class="ghost" id="btnBackFromRef" hidden>← 返回正文</button></h4>
         <div id="refList" class="refs"></div>
+        <button class="ghost" id="btnRefAudit" style="width:100%;margin-top:8px">筛查参考文献（哪些是凑引用）</button>
+        <div id="refAudit" class="hint"></div>
       </aside>
       <div class="page-pane" id="pagePane">
         <div class="page-wrap" id="pageWrap"></div>

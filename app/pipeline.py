@@ -179,5 +179,8 @@ def delete_paper(pid: int) -> None:
     idx = _index_path(pid)
     if idx.exists():
         idx.unlink()
+    # 同一份 PDF 可能被两篇论文共用（比如重复入库的副本），还有别的记录引用它就不能删文件
     if row and Path(row["path"]).exists():
-        Path(row["path"]).unlink()
+        others = one("SELECT id FROM papers WHERE path=?", (row["path"],))
+        if not others:
+            Path(row["path"]).unlink()

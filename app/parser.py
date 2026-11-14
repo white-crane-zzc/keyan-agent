@@ -15,6 +15,48 @@ except ImportError:  # 兼容旧版
 
 from .config import CHUNK_MAX_CHARS
 
+_OCR_ENGINE = None
+
+
+def _ocr_engine():
+    """懒加载离线 OCR 引擎（rapidocr-onnxruntime，CPU 可跑，不联网、不调用外部 API）。"""
+    global _OCR_ENGINE
+    if _OCR_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR  # 延迟导入，没装 OCR 也能跑普通 PDF
+        _OCR_ENGINE = RapidOCR()
+    return _OCR_ENGINE
+
+
+def ocr_page(page, pno: int, dpi: int = 200) -> list[dict]:
+    """对没有文本层的一页做 OCR，返回与文本块同结构的 block（已换算成 PDF 点坐标）。"""
+    try:
+        import numpy as np
+        from io import BytesIO
+        from PIL import Image
+        eng = _ocr_engine()
+    except Exception:
+        return []
+    try:
+        pix = page.get_pixmap(dpi=dpi)
+        img = np.array(Image.open(BytesIO(pix.tobytes("png"))).convert("RGB"))
+        result, _ = eng(img)
+    except Exception:
+        return []
+    scale = 72.0 / dpi
+    out: list[dict] = []
+    for item in result or []:
+        box, text = item[0], (item[1] or "").strip()
+        if not text:
+            continue
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        bbox = [round(min(xs) * scale, 1), round(min(ys) * scale, 1),
+                round(max(xs) * scale, 1), round(max(ys) * scale, 1)]
+        out.append({"bbox": bbox, "text": _norm(text), "size": 10.0, "bold": False,
+                    "page": pno, "ocr": True})
+    return out
+
+
 MATH_CHARS = set("∑∫∏√≈≤≥±∓∂∇∞∈∉⊂⊃∪∩∝αβγδεζηθλμνξπρστφχψωΓΔΘΛΞΠΣΦΨΩ")
 KEY_SECTIONS = {
     "abstract": 1, "摘要": 1, "introduction": 1, "引言": 1, "background": 1,
@@ -338,6 +380,7 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
     font_counter: Counter = Counter()
     tables: list[dict] = []
     figures: list[dict] = []
+    ocr_pages: list[int] = []
 
     for pno in range(n_pages):
         page = doc[pno]
@@ -357,6 +400,12 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
                         font_counter[round(float(s.get("size", 0)), 1)] += len(s["text"])
             bb = [round(v, 1) for v in b["bbox"]]
             blocks.append({"bbox": bb, "text": text, "size": size, "bold": bold, "page": pno + 1})
+        # 扫描件：没有文本层（或极少）就走离线 OCR，把识别结果当文本块
+        if sum(len(b["text"]) for b in blocks) < 40:
+            ocr_blocks = ocr_page(page, pno + 1)
+            if ocr_blocks:
+                blocks.extend(ocr_blocks)
+                ocr_pages.append(pno + 1)
         ncol = _detect_columns(blocks, pw)
         ordered = _read_order(blocks, ncol, pw)
         for blk in ordered:
@@ -552,6 +601,7 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
         "n_refs": len(refs),
         "n_chars": n_chars,
         "body_font": body_size,
+        "n_ocr_pages": len(ocr_pages),
     }
     doc.close()
     return {
