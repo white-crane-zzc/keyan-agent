@@ -146,6 +146,6 @@ Copy-Item .env.example .env
 
 ## 团队与许可
 
-- 团队：white-crane-zzz（独立完成）。承担需求梳理、后端（PDF 解析、去重、检索问答、引用图谱、大模型接入）、前端六页签与可视化、测试与文档。
-- 联系方式：GitHub [@white-crane-zzz](https://github.com/white-crane-zzz)；问题与建议可直接在仓库提 Issue。
+- 团队：white-crane-zzc（独立完成）。承担需求梳理、后端（PDF 解析、去重、检索问答、引用图谱、大模型接入）、前端六页签与可视化、测试与文档。
+- 联系方式：GitHub [@white-crane-zzc](https://github.com/white-crane-zzc)；问题与建议可直接在仓库提 Issue。
 - 许可：代码为自研，供学习与评审使用；第三方库版权归各自作者（PyMuPDF、FastAPI、networkx、matplotlib、rapidocr-onnxruntime 等），清单见 `requirements.txt`。
