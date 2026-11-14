@@ -1,20 +1,22 @@
+# 环境与缓存
 .venv/
 __pycache__/
 *.pyc
 .env
-data/library.db*
-data/index/
-data/pages/
-data/plots/
-data/staging/
-data/upload_tmp/
-data/pdf/
-data/demo/
-data/*.log
-data/*.png
+
+# 运行期数据（论文原件、索引、截图、导出物，均由使用者本机生成）
+data/
+
+# 交付压缩包与演示视频（体积大，走网盘与视频平台，不进仓库）
+dist/
 docs/*.mp4
 docs/*.html
-data/edge_prof*/
-data/*.json
-data/shot_*.png
-data/flow_*.png
+docs/*.docx
+*.zip
+
+# 文档生成与复核时的临时产物
+docs/_pdfcheck/
+docs/_imgex/
+docs/_tmp_figs/
+docs/_req_slices*/
+docs/_probe.pdf

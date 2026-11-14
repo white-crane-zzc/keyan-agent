@@ -54,7 +54,7 @@
 ```powershell
 # 1. 创建环境并装依赖（Python 3.10+）
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install fastapi "uvicorn[standard]" python-multipart pymupdf numpy networkx httpx matplotlib pandas rapidocr-onnxruntime
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 # 2. 启动
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
@@ -64,6 +64,17 @@ start http://127.0.0.1:8000
 ```
 
 Windows 下也可直接双击 `启动.cmd`（自动建环境、装依赖、起服务）。
+
+### 拿到压缩包后在自己或别人电脑上运行
+
+交付压缩包内已带 `data/library.db`（27 篇论文的解析结果）与 `data/pdf/` 原文，**不含** `.venv` 与 `.env`，首次运行按下面 4 步：
+
+1. 装 Python 3.10+（官网安装包即可，安装时勾选 Add to PATH）；
+2. 解压到任意目录（路径别含空格以外的特殊字符），双击 `启动.cmd`——它会自建 `.venv`、按 `requirements.txt` 装依赖（**需联网**，约 5-10 分钟，含 OCR 与绘图库）；
+3. 浏览器打开 `http://127.0.0.1:8000`，文库页应能看到 27 篇论文，说明库与解析数据正常；
+4. 要用大模型问答/翻译：`copy .env.example .env`，填自己的 `LLM_API_KEY`（DeepSeek/豆包等任意 OpenAI 兼容接口），重启服务。不填也能用，问答会给带页码的原文证据，翻译会提示降级。
+
+已验证：把交付包解压到空目录、从零建环境装依赖后，服务可正常启动，`/api/status` 返回 27 篇 / 22217 块 / 2369 引用，文库、阅读、问答（证据模式）、图谱、写作、推荐六个页签均可打开。
 
 ## 配置大模型（可选）
 
@@ -118,16 +129,16 @@ Copy-Item .env.example .env
 ## 实测结果（本机自测）
 
 - 解析：Attention（15 页/单栏/40 条参考文献/24 章节）、BERT（16 页/双栏/59 条/25 章节）标题、年份、层级全部正确。
-- 分块覆盖：参考文献之后若还有附录，继续按正文入库（不再把附录当参考文献丢掉）；首页作者/单位与每条参考文献也单独建块。Attention 461 块、BERT 388 块，全库 27 篇 22217 块 / 2369 条参考文献。
+- 分块覆盖：参考文献之后若还有附录，继续按正文入库（不再把附录当参考文献丢掉）；首页作者/单位与每条参考文献也单独建块。Attention 461 块、BERT 388 块，全库 28 篇 22673 块 / 2405 条参考文献。
 - 检索：中文提问命中英文原文——术语词表 + 模型检索式 + 模型重排三层，问「多头注意力每头维度」可定位到 3.2.2 并答出 h=8、d_k=d_v=64；问「第6作者是谁、在哪家公司」答出 Aidan N. Gomez / University of Toronto；问「引用的 Layer Normalization 文献」答出 Ba、Kiros、Hinton 2016；多篇对比按篇配额召回。
 - 去重：同一篇 v1 与 v7（版面不同、v7 首页多授权声明）判定为重复，相似度 **0.954**，差异对比与「保留库内版本」建议均正常；`keep_both` 可并存。
 - 大模型：DeepSeek `deepseek-chat` 实测可用（问答 1.8-3.5s、翻译 0.9s、论文框架 5.7s、综述/未来工作 2-7s）；填占位串时自动判定为未配置，退回证据模式。
-- 问答、多篇问答、图谱（3 节点 1 边，基石=Attention）、页面渲染（2 栏 13 块/497KB PNG）、CSV 绘图、推荐（8 条）均通过。
+- 问答、多篇问答、图谱（全库 28 节点 92 边，基石=BERT 被引 13、边缘论文自动标出）、页面渲染、CSV/XLSX 绘图、推荐均通过。
 - 前端六页签真实点击验证通过，无 JS 异常（`tests/ui_flow.py`）。
 
 ## 已知限制
 
-- 扫描版 PDF 走文本层，无 OCR 时解析为空，需接 OCR（未接）。
+- 扫描版 PDF 无文本层时自动走离线 OCR（rapidocr-onnxruntime，装依赖即生效），识别框坐标可回算回 PDF 坐标；但逐页识别较慢，4 页约 38 秒，上百页扫描件需要等几分钟。
 - 公式为 PDF 渲染图，未做 LaTeX 抽取。
 - 「超参数表/数值型」问题召回仍不稳：表格已单独入块并可检索，但中文问「超参数设置」或问表格里单个数字（如被超越模型的 26.36 BLEU）时仍可能被判定为「材料未提及」，需继续加语义检索或人工核对原文页码。
 - 大模型未配置时，问答/翻译/综述只输出检索证据，不做生成。
@@ -135,4 +146,6 @@ Copy-Item .env.example .env
 
 ## 团队与许可
 
-本地竞赛用实现，代码为自研；第三方库版权归各自作者（PyMuPDF、FastAPI、networkx、matplotlib 等）。
+- 团队：white-crane-zzz（独立完成）。承担需求梳理、后端（PDF 解析、去重、检索问答、引用图谱、大模型接入）、前端六页签与可视化、测试与文档。
+- 联系方式：GitHub [@white-crane-zzz](https://github.com/white-crane-zzz)；问题与建议可直接在仓库提 Issue。
+- 许可：代码为自研，供学习与评审使用；第三方库版权归各自作者（PyMuPDF、FastAPI、networkx、matplotlib、rapidocr-onnxruntime 等），清单见 `requirements.txt`。

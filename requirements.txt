@@ -1,9 +1,24 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pymupdf
-numpy
-networkx
-httpx
-matplotlib
-pandas
+# 运行依赖：版本为 Python 3.13 / Windows 11 上的实测版本，锁定以保证换机复现一致
+# 安装：python -m pip install -r requirements.txt
+
+# Web 服务
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
+httpx==0.28.1
+
+# 文档解析（含离线 OCR）
+pymupdf==2.1
+rapidocr-onnxruntime==1.2.3
+
+# 检索与引用图谱
+numpy==2.5.4
+networkx==3.7
+
+# 出图与表格处理
+matplotlib==3.11.2
+pandas==3.1.1
+
+# 文档生成脚本使用（docs/make_pdf.py、docs/make_intro_pdf.py）
+reportlab==5.1.0
+python-docx==1.2.0
