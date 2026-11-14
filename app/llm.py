@@ -90,14 +90,23 @@ def outline(idea: str, refs: str) -> str:
     ], temperature=0.4, max_tokens=3000)
 
 
-def diagram(desc: str) -> str:
+SPECS = {
+    "mermaid": ("Mermaid", "```mermaid"),
+    "tikz": ("LaTeX TikZ", "```latex"),
+    "graphviz": ("Graphviz DOT", "```dot"),
+}
+
+
+def diagram(desc: str, kind: str = "mermaid") -> str:
+    """kind: mermaid | tikz | graphviz"""
+    name, fence = SPECS.get((kind or "mermaid").lower(), SPECS["mermaid"])
     return chat([
         {"role": "system", "content": "你是擅长学术绘图的工程师。"},
         {"role": "user", "content": (
-            f"用 Mermaid 语法画一张论文架构图：{desc}\n"
-            "只输出 mermaid 代码块，节点命名简洁，不要解释。"
+            f"用 {name} 语法画一张论文架构图：{desc}\n"
+            f"只输出代码块（以 {fence} 开头），节点命名简洁，不要解释。"
         )},
-    ], temperature=0.2, max_tokens=1200)
+    ], temperature=0.2, max_tokens=1600)
 
 
 def search_terms(question: str) -> str:

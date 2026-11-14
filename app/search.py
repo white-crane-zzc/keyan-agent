@@ -82,8 +82,11 @@ class Index:
                 dl = self.doc_len[i]
                 s = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / (self.avg_len or 1)))
                 txt = self.docs[i]["text"]
-                # 图表标题、页眉页脚、纯数字行降权：不是正文论据；表格块保留（参数表本身就是答案）
-                if "表格" not in self.docs[i]["section"]:
+                sec = self.docs[i]["section"] or ""
+                # 参考文献块、图表标题、页眉页脚、纯数字行降权：不是正文论据；表格块保留（参数表本身就是答案）
+                if sec == "参考文献":
+                    s *= 0.45
+                if "表格" not in sec:
                     head = txt.lstrip()[:14].lower()
                     if head.startswith(("figure", "table", "fig.", "tab.", "图 ", "表 ")) or \
                             sum(c.isdigit() for c in txt) / max(len(txt), 1) > 0.35:
@@ -121,10 +124,9 @@ TERM_MAP = {
     "维度": ["dimension", "d_model"],
     "头数": ["heads"],
     "复杂度": ["complexity"],
-    "超参数": ["hyperparameters", "hyperparameter", "layers hidden heads"],
+    "超参数": ["hyperparameters", "hyperparameter", "layers hidden heads", "batch size", "learning rate"],
     "预训练任务": ["masked language model", "next sentence prediction", "pre-training tasks"],
     "附录": ["appendix"],
-    "超参数": ["hyperparameter"],
     "数据集": ["dataset", "corpus"],
     "准确率": ["accuracy"],
     "泛化": ["generalization"],
@@ -138,6 +140,16 @@ TERM_MAP = {
     "结论": ["conclusion"],
     "未来工作": ["future work"],
     "局限性": ["limitation"],
+    "作者": ["authors", "author", "affiliation", "google", "university"],
+    "单位": ["affiliation", "affiliations", "university", "research"],
+    "机构": ["affiliation", "institute", "company", "university"],
+    "参数量": ["parameters", "million parameters", "billion parameters"],
+    "参数": ["parameters"],
+    "上下文": ["context", "context window", "tokens"],
+    "窗口": ["context window", "tokens"],
+    "参考文献": ["references", "bibliography"],
+    "引用文献": ["references"],
+    "年份": ["year"],
 }
 
 

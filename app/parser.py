@@ -434,6 +434,33 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
     chunks: list[dict] = []
     abstract_parts: list[str] = []
     ref_text_parts: list[str] = []
+    front_parts: list[str] = []
+
+    def _collect_front(i_max: int) -> None:
+        """首页标题/作者/单位/邮箱单独建块，否则「第6作者在哪家公司」必然答不出。
+
+        作者常见「姓名一行、单位一行、邮箱一行」的网格排版，按 PDF 原始块顺序取会错位，
+        所以先按行聚类（同一行的 y 差小于 6pt），行内按 x 排，得到真实的作者顺序。
+        """
+        rows: list[list[dict]] = []
+        for b in raw_blocks[:i_max]:
+            if b["page"] != 1:
+                continue
+            if (b["page"], tuple(b["bbox"])) in skip_blocks:
+                continue
+            t = re.sub(r"\s+", " ", b["text"]).strip()
+            if not (2 < len(t) < 200):
+                continue
+            y = b["bbox"][1]
+            for r in rows:
+                if abs(r[0]["bbox"][1] - y) < 6:
+                    r.append(b)
+                    break
+            else:
+                rows.append([b])
+        for r in sorted(rows, key=lambda r: min(x["bbox"][1] for x in r)):
+            for b in sorted(r, key=lambda x: x["bbox"][0]):
+                front_parts.append(re.sub(r"\s+", " ", b["text"]).strip())
     cur_section = "Body"
 
     for idx, blk in enumerate(raw_blocks):
@@ -482,6 +509,25 @@ def parse_pdf(path: str | Path) -> dict[str, Any]:
         cand = _parse_refs(tail_lines)
         if len(cand) > len(refs):
             refs = cand
+
+    # 参考文献条目单独建块：问「引用的 Layer Normalization 文献作者和年份」时必须能检索到
+    refs_page = raw_blocks[refs_start]["page"] if refs_start >= 0 else 1
+    for r in refs:
+        body = (r.get("raw") or "").strip()
+        if len(body) < 12:
+            body = " ".join(x for x in (r.get("authors"), r.get("title"), r.get("year")) if x)
+        if len(body) < 8:
+            continue
+        chunks.append({"page": refs_page, "section": "参考文献",
+                       "text": body[:CHUNK_MAX_CHARS], "kind": "reference"})
+
+    # 首页信息块：把标题、作者、单位、邮箱单独成块入索引，否则「第6作者在哪家公司」无法检索
+    if abs_idx is not None:
+        _collect_front(abs_idx)
+    front_text = _norm(" ".join(front_parts))[:1200]
+    if len(front_text) > 30:
+        chunks.append({"page": 1, "section": "首页(标题/作者/单位/联系方式)",
+                       "text": front_text, "kind": "front"})
 
     # 表格内容单独入块：超参数表、结果表也要能被检索到
     for t in tables:

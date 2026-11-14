@@ -347,12 +347,15 @@ def write_outline(payload: dict = Body(...)) -> dict:
 @app.post("/api/write/diagram")
 def write_diagram(payload: dict = Body(...)) -> dict:
     desc = (payload.get("desc") or "").strip()
+    kind = (payload.get("kind") or "mermaid").lower()
+    if kind not in ("mermaid", "tikz", "graphviz"):
+        kind = "mermaid"
     if not desc:
         raise HTTPException(400, "请描述架构")
     if not llm_ready():
         return {"text": "```mermaid\nflowchart LR\nA[输入] --> B[编码器] --> C[解码器] --> D[输出]\n```", "degraded": True}
     try:
-        return {"text": llm.diagram(desc)}
+        return {"text": llm.diagram(desc, kind)}
     except llm.LLMUnavailable as e:
         raise HTTPException(502, str(e))
 
