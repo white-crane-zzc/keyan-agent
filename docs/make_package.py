@@ -14,7 +14,8 @@ INCLUDE_FILES = ["README.md", "requirements.txt", "启动.cmd", "run.ps1", ".env
 # data 下只保留数据库与 PDF 原文
 DATA_KEEP = ["library.db", "pdf"]
 
-EXCLUDE_NAMES = {".env", "__pycache__", ".pytest_cache", ".DS_Store", "科研小助手Agent-作品介绍.docx", "演示视频.mp4"}
+EXCLUDE_NAMES = {".env", "__pycache__", ".pytest_cache", ".DS_Store", "科研小助手Agent-作品介绍.docx", "演示视频.mp4",
+                 "演示视频稿.md"}
 EXCLUDE_SUFFIX = {".pyc", ".pyo", ".log"}
 # docs 下的临时核对目录与探针文件（"_pdfcheck"、"_imgex"、"_tmp_figs"、"_req_slices"…）
 EXCLUDE_PREFIX = ("_",)
@@ -45,6 +46,7 @@ def main():
                     src = Path(dirpath) / fn
                     is_docs = str(src.relative_to(ROOT)).replace("\\", "/").startswith("docs/")
                     if (fn in EXCLUDE_NAMES or fn in EXCLUDE_FILES
+                            or (is_docs and fn.startswith(EXCLUDE_PREFIX))
                             or Path(fn).suffix.lower() in EXCLUDE_SUFFIX
                             or (is_docs and Path(fn).suffix.lower() in DOCS_SKIP_SUFFIX)):
                         skipped.append(str(src))
